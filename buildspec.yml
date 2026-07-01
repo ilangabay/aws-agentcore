@@ -1,0 +1,28 @@
+version: 0.2
+
+# Builds the FastAPI backend image and pushes it to ECR.
+# CodeBuild runs this on AWS infra using its service role — no local Docker,
+# no local AWS credentials needed.
+#
+# Required environment variables (set these in the CodeBuild project):
+#   AWS_ACCOUNT_ID = 474668391771
+#   AWS_DEFAULT_REGION = us-east-1
+#   IMAGE_REPO_NAME = agent-backend
+#   IMAGE_TAG = latest
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr describe-repositories --repository-names $IMAGE_REPO_NAME --region $AWS_DEFAULT_REGION || aws ecr create-repository --repository-name $IMAGE_REPO_NAME --region $AWS_DEFAULT_REGION
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - REPO_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
+  build:
+    commands:
+      - echo Building the Docker image...
+      - docker build -t $REPO_URI:$IMAGE_TAG .
+  post_build:
+    commands:
+      - echo Pushing the Docker image...
+      - docker push $REPO_URI:$IMAGE_TAG
+      - echo "Image pushed: $REPO_URI:$IMAGE_TAG"

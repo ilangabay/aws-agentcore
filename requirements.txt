@@ -1,3 +1,7 @@
 ﻿bedrock-agentcore
+fastapi
 strands-agents
 strands-agents-tools
+uvicorn
+requests
+botocore

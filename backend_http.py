@@ -42,7 +42,7 @@ SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
-                   allow_methods=["*"], allow_headers=["*"])
+                allow_methods=["*"], allow_headers=["*"])
 
 
 class ChatRequest(BaseModel):
