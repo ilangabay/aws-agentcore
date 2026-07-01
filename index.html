@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AgentCore Demonstrator</title>
+<style>
+  /* ── Design tokens ──────────────────────────────────────────
+     Subject: an internal "clearance terminal" for a secret-agent-themed
+     AgentCore demo (agent007). Direction: instrument-panel, not chatbot —
+     monospaced data face, a single amber signal accent on near-black,
+     login framed as "clearance" and the JWT as a visible credential strip.
+     Spends its one risk on the credential strip that reveals the live token. */
+  :root {
+    --bg:        #0d0f12;
+    --panel:     #15181d;
+    --line:      #262b33;
+    --ink:       #e7e9ec;
+    --ink-dim:   #8b929c;
+    --signal:    #f5a623;   /* amber clearance light */
+    --signal-dim:#5a4a26;
+    --ok:        #4caf7e;
+    --bad:       #e5564b;
+    --mono: "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--mono); font-size: 14px; line-height: 1.5;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .terminal {
+    width: 100%; max-width: 560px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
+  }
+  .bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+    font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--signal-dim); }
+  .dot.live { background: var(--signal); box-shadow: 0 0 8px var(--signal); }
+  .body { padding: 20px 16px; }
+  label { display: block; font-size: 11px; letter-spacing: 0.1em;
+          text-transform: uppercase; color: var(--ink-dim); margin: 0 0 6px; }
+  input, textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--line);
+    color: var(--ink); font-family: var(--mono); font-size: 14px;
+    padding: 10px 12px; border-radius: 3px; margin-bottom: 14px;
+  }
+  input:focus, textarea:focus { outline: none; border-color: var(--signal); }
+  button {
+    background: var(--signal); color: #1a1305; border: none; cursor: pointer;
+    font-family: var(--mono); font-weight: 600; font-size: 13px;
+    letter-spacing: 0.06em; padding: 10px 16px; border-radius: 3px;
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--ink-dim);
+                 border: 1px solid var(--line); }
+  .hidden { display: none; }
+  .cred {
+    margin-top: 14px; padding: 10px 12px; background: var(--bg);
+    border: 1px dashed var(--signal-dim); border-radius: 3px;
+    font-size: 11px; color: var(--ink-dim); word-break: break-all; max-height: 90px;
+    overflow: auto;
+  }
+  .cred b { color: var(--signal); }
+  .log { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .msg { margin-bottom: 12px; }
+  .msg .who { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+              color: var(--ink-dim); margin-bottom: 3px; }
+  .msg.agent .who { color: var(--signal); }
+  .status { font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: var(--bad); }
+</style>
+</head>
+<body>
+<div class="terminal">
+  <div class="bar">
+    <span class="dot" id="signal"></span>
+    <span id="barlabel">Clearance required</span>
+  </div>
+  <div class="body">
+
+    <!-- Login -->
+    <div id="login">
+      <label for="user">Operative ID</label>
+      <input id="user" autocomplete="username" placeholder="ilangabay" />
+      <label for="pass">Passphrase</label>
+      <input id="pass" type="password" autocomplete="current-password" />
+      <button id="loginBtn">Request clearance</button>
+      <div class="status" id="loginStatus"></div>
+    </div>
+
+    <!-- Authenticated -->
+    <div id="console" class="hidden">
+      <div class="cred">
+        <b>JWT acquired.</b> This token is sent as a Bearer credential on every
+        agent call. <span id="tokenPreview"></span>
+      </div>
+      <div class="log" id="log"></div>
+      <label for="prompt" style="margin-top:14px">Message</label>
+      <textarea id="prompt" rows="2" placeholder="Ask the agent…"></textarea>
+      <div style="display:flex; gap:8px;">
+        <button id="sendBtn">Transmit</button>
+        <button id="logoutBtn" class="ghost">Revoke</button>
+      </div>
+      <div class="status" id="chatStatus"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // ── Config: fill in YOUR values ─────────────────────────────
+  const REGION    = "us-east-1";
+  const CLIENT_ID = "7dl51utivb5aikm9c41kd3gsi5";          // your app client
+  const BACKEND   = "http://localhost:8000/chat";          // the FastAPI backend
+  const COGNITO   = `https://cognito-idp.${REGION}.amazonaws.com/`;
+  // ────────────────────────────────────────────────────────────
+
+  let idToken = null;
+  // AgentCore requires runtimeSessionId length >= 33.
+  let sessionId = "demo-" + Math.random().toString(36).slice(2) +
+                            Math.random().toString(36).slice(2) +
+                            Date.now().toString(36);
+
+  const $ = (id) => document.getElementById(id);
+
+  // Cognito USER_PASSWORD_AUTH directly from the browser.
+  // This is the InitiateAuth API call — no SDK needed, just a POST.
+  async function login(username, password) {
+    const res = await fetch(COGNITO, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-amz-json-1.1",
+        "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
+      },
+      body: JSON.stringify({
+        AuthFlow: "USER_PASSWORD_AUTH",
+        ClientId: CLIENT_ID,
+        AuthParameters: { USERNAME: username, PASSWORD: password },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || data.__type || "auth failed");
+    // The Harness authorizer checks the 'client_id' claim, which lives on the
+    // ACCESS token (the ID token carries the client under 'aud' instead).
+    return data.AuthenticationResult.AccessToken;
+  }
+
+  async function callAgent(prompt) {
+    const res = await fetch(BACKEND, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + idToken,   // the credential under test
+      },
+      body: JSON.stringify({ prompt, sessionId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "agent call failed");
+    return data.result;
+  }
+
+  function addMsg(who, text, cls) {
+    const d = document.createElement("div");
+    d.className = "msg " + (cls || "");
+    d.innerHTML = `<div class="who">${who}</div><div>${escapeHtml(text)}</div>`;
+    $("log").appendChild(d);
+    $("log").scrollTop = $("log").scrollHeight;
+  }
+  function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+
+  $("loginBtn").onclick = async () => {
+    const u = $("user").value.trim(), p = $("pass").value;
+    if (!u || !p) return;
+    $("loginStatus").textContent = "Authenticating…";
+    $("loginStatus").className = "status";
+    $("loginBtn").disabled = true;
+    try {
+      idToken = await login(u, p);
+      $("signal").classList.add("live");
+      $("barlabel").textContent = "Cleared · " + u;
+      $("login").classList.add("hidden");
+      $("console").classList.remove("hidden");
+      $("tokenPreview").textContent = idToken.slice(0, 24) + "…";
+    } catch (e) {
+      $("loginStatus").textContent = "Denied: " + e.message;
+      $("loginStatus").className = "status bad";
+    } finally {
+      $("loginBtn").disabled = false;
+    }
+  };
+
+  $("sendBtn").onclick = async () => {
+    const prompt = $("prompt").value.trim();
+    if (!prompt) return;
+    addMsg("Operative", prompt, "user");
+    $("prompt").value = "";
+    $("chatStatus").textContent = "Transmitting…";
+    $("chatStatus").className = "status";
+    $("sendBtn").disabled = true;
+    try {
+      const reply = await callAgent(prompt);
+      addMsg("Agent", reply, "agent");
+      $("chatStatus").textContent = "";
+    } catch (e) {
+      $("chatStatus").textContent = "Error: " + e.message;
+      $("chatStatus").className = "status bad";
+    } finally {
+      $("sendBtn").disabled = false;
+    }
+  };
+
+  $("logoutBtn").onclick = () => {
+    idToken = null;
+    $("signal").classList.remove("live");
+    $("barlabel").textContent = "Clearance required";
+    $("console").classList.add("hidden");
+    $("login").classList.remove("hidden");
+    $("log").innerHTML = "";
+    $("loginStatus").textContent = "";
+  };
+</script>
+</body>
+</html>

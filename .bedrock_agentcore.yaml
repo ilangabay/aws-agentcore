@@ -1,0 +1,182 @@
+default_agent: agent007neverforgets
+agents:
+  secretagent:
+    name: secretagent
+    language: python
+    node_version: '20'
+    entrypoint: C:/igabay/bedrockagentcore/my_agent.py
+    deployment_type: container
+    runtime_type: null
+    platform: linux/arm64
+    container_runtime: none
+    source_path: C:\igabay\bedrockagentcore
+    aws:
+      execution_role: arn:aws:iam::474668391771:role/AmazonBedrockAgentCoreSDKRuntime-us-east-1-b207725b3b
+      execution_role_auto_create: false
+      account: '474668391771'
+      region: us-east-1
+      ecr_repository: 474668391771.dkr.ecr.us-east-1.amazonaws.com/bedrock-agentcore-secretagent
+      ecr_auto_create: false
+      s3_path: null
+      s3_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+        network_mode_config: null
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+      lifecycle_configuration:
+        idle_runtime_session_timeout: null
+        max_lifetime: null
+    bedrock_agentcore:
+      agent_id: secretagent-1SVypyHxmN
+      agent_arn: arn:aws:bedrock-agentcore:us-east-1:474668391771:runtime/secretagent-1SVypyHxmN
+      agent_session_id: dc9fbd16-ee55-4c65-afa4-2ce01a373afa
+    codebuild:
+      project_name: bedrock-agentcore-secretagent-builder
+      execution_role: arn:aws:iam::474668391771:role/AmazonBedrockAgentCoreSDKCodeBuild-us-east-1-b207725b3b
+      source_bucket: bedrock-agentcore-codebuild-sources-474668391771-us-east-1
+    memory:
+      mode: NO_MEMORY
+      memory_id: null
+      memory_arn: null
+      memory_name: null
+      event_expiry_days: 30
+      first_invoke_memory_check_done: false
+      was_created_by_toolkit: false
+    identity:
+      credential_providers: []
+      workload: null
+    aws_jwt:
+      enabled: false
+      audiences: []
+      signing_algorithm: ES384
+      issuer_url: null
+      duration_seconds: 300
+    authorizer_configuration: null
+    request_header_configuration: null
+    oauth_configuration: null
+    api_key_env_var_name: null
+    api_key_credential_provider_name: null
+    is_generated_by_agentcore_create: false
+  agent007remembers:
+    name: agent007remembers
+    language: python
+    node_version: '20'
+    entrypoint: C:/igabay/bedrockagentcore/my_agent.py
+    deployment_type: container
+    runtime_type: null
+    platform: linux/arm64
+    container_runtime: none
+    source_path: C:\igabay\bedrockagentcore
+    aws:
+      execution_role: arn:aws:iam::474668391771:role/AmazonBedrockAgentCoreSDKRuntime-us-east-1-e38ba6f435
+      execution_role_auto_create: false
+      account: '474668391771'
+      region: us-east-1
+      ecr_repository: 474668391771.dkr.ecr.us-east-1.amazonaws.com/bedrock-agentcore-agent007remembers
+      ecr_auto_create: false
+      s3_path: null
+      s3_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+        network_mode_config: null
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+      lifecycle_configuration:
+        idle_runtime_session_timeout: null
+        max_lifetime: null
+    bedrock_agentcore:
+      agent_id: agent007remembers-S14jdw9SAa
+      agent_arn: arn:aws:bedrock-agentcore:us-east-1:474668391771:runtime/agent007remembers-S14jdw9SAa
+      agent_session_id: fc69ad64-04c0-4074-8d3d-7a374efc1503
+    codebuild:
+      project_name: bedrock-agentcore-agent007remembers-builder
+      execution_role: arn:aws:iam::474668391771:role/AmazonBedrockAgentCoreSDKCodeBuild-us-east-1-e38ba6f435
+      source_bucket: bedrock-agentcore-codebuild-sources-474668391771-us-east-1
+    memory:
+      mode: STM_AND_LTM
+      memory_id: agent007remembers_mem-NexdES4zDx
+      memory_arn: arn:aws:bedrock-agentcore:us-east-1:474668391771:memory/agent007remembers_mem-NexdES4zDx
+      memory_name: agent007remembers_mem
+      event_expiry_days: 30
+      first_invoke_memory_check_done: true
+      was_created_by_toolkit: true
+    identity:
+      credential_providers: []
+      workload: null
+    aws_jwt:
+      enabled: false
+      audiences: []
+      signing_algorithm: ES384
+      issuer_url: null
+      duration_seconds: 300
+    authorizer_configuration: null
+    request_header_configuration: null
+    oauth_configuration: null
+    api_key_env_var_name: null
+    api_key_credential_provider_name: null
+    is_generated_by_agentcore_create: false
+  agent007neverforgets:
+    name: agent007neverforgets
+    language: python
+    node_version: '20'
+    entrypoint: C:/igabay/bedrockagentcore/my_agent.py
+    deployment_type: container
+    runtime_type: null
+    platform: linux/arm64
+    container_runtime: none
+    source_path: C:\igabay\bedrockagentcore
+    aws:
+      execution_role: arn:aws:iam::474668391771:role/AmazonBedrockAgentCoreSDKRuntime-us-east-1-5907a76e72
+      execution_role_auto_create: false
+      account: '474668391771'
+      region: us-east-1
+      ecr_repository: 474668391771.dkr.ecr.us-east-1.amazonaws.com/bedrock-agentcore-agent007neverforgets
+      ecr_auto_create: false
+      s3_path: null
+      s3_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+        network_mode_config: null
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+      lifecycle_configuration:
+        idle_runtime_session_timeout: null
+        max_lifetime: null
+    bedrock_agentcore:
+      agent_id: agent007neverforgets-0TGHyB5kw2
+      agent_arn: arn:aws:bedrock-agentcore:us-east-1:474668391771:runtime/agent007neverforgets-0TGHyB5kw2
+      agent_session_id: b2916292-6738-4369-b672-d15f1a70b890
+    codebuild:
+      project_name: bedrock-agentcore-agent007neverforgets-builder
+      execution_role: arn:aws:iam::474668391771:role/AmazonBedrockAgentCoreSDKCodeBuild-us-east-1-5907a76e72
+      source_bucket: bedrock-agentcore-codebuild-sources-474668391771-us-east-1
+    memory:
+      mode: STM_AND_LTM
+      memory_id: agent007remembers_mem-NexdES4zDx
+      memory_arn: null
+      memory_name: agent007neverforgets_memory
+      event_expiry_days: 30
+      first_invoke_memory_check_done: false
+      was_created_by_toolkit: false
+    identity:
+      credential_providers: []
+      workload: null
+    aws_jwt:
+      enabled: false
+      audiences: []
+      signing_algorithm: ES384
+      issuer_url: null
+      duration_seconds: 300
+    authorizer_configuration: null
+    request_header_configuration: null
+    oauth_configuration: null
+    api_key_env_var_name: null
+    api_key_credential_provider_name: null
+    is_generated_by_agentcore_create: false
