@@ -50,6 +50,11 @@ class ChatRequest(BaseModel):
     sessionId: str            # must be >= 33 chars (AgentCore constraint)
 
 
+@app.get("/")
+def health():
+    return {"status": "ok", "service": "agent-backend"}
+
+
 def extract_text(raw_bytes: bytes) -> str:
     """Decode the AWS event-stream and concatenate contentBlockDelta text."""
     parts = []
