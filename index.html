@@ -7,132 +7,116 @@
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   :root {
-    --bg: #f7f6f3;
-    --surface: #ffffff;
-    --border: #e6e3dc;
-    --border-strong: #d3d1c7;
-    --ink: #2c2c2a;
-    --ink-soft: #6b6a64;
-    --ink-faint: #9a988f;
-    --accent: #4a6fa5;
-    --accent-soft: #eef3f9;
-    --agent-bg: #f1efe8;
-    --user-bg: #eef3f9;
-    --ok: #3b6d3b;
-    --bad: #a32d2d;
+    --bg: #f7f6f3; --surface: #ffffff; --panel: #fbfaf7;
+    --border: #e6e3dc; --border-strong: #d3d1c7;
+    --ink: #2c2c2a; --ink-soft: #6b6a64; --ink-faint: #9a988f;
+    --accent: #4a6fa5; --accent-soft: #eef3f9;
+    --agent-bg: #f1efe8; --user-bg: #eef3f9;
+    --ok: #3b6d3b; --bad: #a32d2d;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font-family: var(--sans); font-size: 15px; line-height: 1.6;
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    padding: 24px;
+    height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
   }
-  .app {
-    width: 100%; max-width: 620px; background: var(--surface);
-    border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
-    display: flex; flex-direction: column; max-height: 90vh;
-  }
-  header {
-    padding: 18px 22px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 10px;
-  }
-  header .logo {
-    width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
-    color: #fff; display: flex; align-items: center; justify-content: center;
-    font-weight: 500; font-size: 15px;
-  }
-  header h1 { font-size: 16px; font-weight: 500; margin: 0; }
-  header .sub { font-size: 12px; color: var(--ink-faint); margin: 0; }
-  header .status {
-    margin-left: auto; font-size: 12px; color: var(--ink-faint);
-    display: flex; align-items: center; gap: 6px;
-  }
-  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); }
-  header .dot.on { background: var(--ok); }
+  .app { width: 100%; max-width: 900px; height: 88vh; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 16px; overflow: hidden; display: flex; }
 
-  /* Login */
-  .login { padding: 28px 22px; }
-  .login p.lead { color: var(--ink-soft); font-size: 14px; margin: 0 0 20px; }
+  /* Login (centered card, hides the split layout) */
+  .login-wrap { width: 100%; display: flex; align-items: center; justify-content: center; }
+  .login { width: 340px; padding: 32px; }
+  .login h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .login p.lead { color: var(--ink-soft); font-size: 14px; margin: 0 0 22px; }
   label { display: block; font-size: 13px; color: var(--ink-soft); margin: 0 0 6px; }
-  input {
-    width: 100%; padding: 10px 12px; font-size: 15px; font-family: var(--sans);
-    border: 1px solid var(--border-strong); border-radius: 8px; background: #fff;
-    color: var(--ink); margin-bottom: 16px;
-  }
+  input { width: 100%; padding: 10px 12px; font-size: 15px; font-family: var(--sans);
+    border: 1px solid var(--border-strong); border-radius: 8px; background: #fff; color: var(--ink); margin-bottom: 16px; }
   input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-  button.primary {
-    width: 100%; padding: 11px; font-size: 14px; font-weight: 500; font-family: var(--sans);
-    background: var(--accent); color: #fff; border: none; border-radius: 8px; cursor: pointer;
-  }
+  button.primary { width: 100%; padding: 11px; font-size: 14px; font-weight: 500; font-family: var(--sans);
+    background: var(--accent); color: #fff; border: none; border-radius: 8px; cursor: pointer; }
   button.primary:hover { background: #3d5d8a; }
   button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .note { font-size: 12px; min-height: 14px; margin-top: 4px; }
+  .note.bad { color: var(--bad); }
 
-  /* Chat */
-  .chat { display: none; flex-direction: column; flex: 1; min-height: 0; }
-  .log { flex: 1; overflow-y: auto; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px; }
-  .msg { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
-  .msg .who { font-size: 11px; color: var(--ink-faint); letter-spacing: 0.02em; }
+  /* Sidebar */
+  .sidebar { width: 260px; border-right: 1px solid var(--border); background: var(--panel);
+    display: flex; flex-direction: column; }
+  .sidebar .top { padding: 16px; border-bottom: 1px solid var(--border); }
+  .newchat { width: 100%; padding: 9px; font-size: 13px; font-weight: 500; font-family: var(--sans);
+    background: var(--accent); color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+  .newchat:hover { background: #3d5d8a; }
+  .convs { flex: 1; overflow-y: auto; padding: 8px; }
+  .conv { padding: 9px 11px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--ink-soft);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+  .conv:hover { background: #f0eee7; }
+  .conv.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+  .user-bar { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+  .user-bar .uname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-bar .signout { font-size: 12px; color: var(--ink-faint); cursor: pointer; background: none; border: none; }
+  .user-bar .signout:hover { color: var(--bad); }
+
+  /* Main chat */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .log { flex: 1; overflow-y: auto; padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+  .empty { margin: auto; color: var(--ink-faint); font-size: 14px; text-align: center; }
+  .msg { display: flex; flex-direction: column; gap: 4px; max-width: 85%; }
+  .msg .who { font-size: 11px; color: var(--ink-faint); }
   .msg .bubble { padding: 10px 14px; border-radius: 12px; font-size: 14px; }
   .msg.user { align-self: flex-end; align-items: flex-end; }
   .msg.user .bubble { background: var(--user-bg); border-bottom-right-radius: 4px; }
   .msg.agent { align-self: flex-start; }
   .msg.agent .bubble { background: var(--agent-bg); border-bottom-left-radius: 4px; }
-  /* markdown inside agent bubbles */
-  .bubble h1, .bubble h2, .bubble h3 { font-size: 15px; font-weight: 500; margin: 10px 0 4px; color: var(--ink); }
-  .bubble p { margin: 6px 0; }
-  .bubble ul, .bubble ol { margin: 6px 0; padding-left: 20px; }
-  .bubble li { margin: 2px 0; }
+  .bubble h1,.bubble h2,.bubble h3 { font-size: 15px; font-weight: 600; margin: 10px 0 4px; }
+  .bubble p { margin: 6px 0; } .bubble ul,.bubble ol { margin: 6px 0; padding-left: 20px; }
   .bubble code { background: rgba(0,0,0,0.05); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
   .bubble pre { background: rgba(0,0,0,0.05); padding: 10px; border-radius: 8px; overflow-x: auto; }
-  .bubble strong { font-weight: 500; }
-  .bubble a { color: var(--accent); }
+  .bubble strong { font-weight: 600; }
 
-  .composer {
-    border-top: 1px solid var(--border); padding: 14px 18px;
-    display: flex; gap: 10px; align-items: flex-end;
-  }
-  .composer textarea {
-    flex: 1; resize: none; padding: 10px 12px; font-size: 14px; font-family: var(--sans);
-    border: 1px solid var(--border-strong); border-radius: 10px; background: #fff;
-    color: var(--ink); max-height: 120px; line-height: 1.5;
-  }
+  .composer { border-top: 1px solid var(--border); padding: 14px 18px; display: flex; gap: 10px; align-items: flex-end; }
+  .composer textarea { flex: 1; resize: none; padding: 10px 12px; font-size: 14px; font-family: var(--sans);
+    border: 1px solid var(--border-strong); border-radius: 10px; background: #fff; color: var(--ink); max-height: 120px; line-height: 1.5; }
   .composer textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-  .composer button {
-    padding: 10px 16px; font-size: 14px; font-weight: 500; font-family: var(--sans);
-    background: var(--accent); color: #fff; border: none; border-radius: 10px; cursor: pointer;
-  }
-  .composer button:hover { background: #3d5d8a; }
+  .composer button { padding: 10px 16px; font-size: 14px; font-weight: 500; font-family: var(--sans);
+    background: var(--accent); color: #fff; border: none; border-radius: 10px; cursor: pointer; }
   .composer button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .note { font-size: 12px; padding: 0 22px 12px; min-height: 14px; }
-  .note.bad { color: var(--bad); }
+  .cnote { font-size: 12px; padding: 0 18px 10px; min-height: 14px; }
+  .cnote.bad { color: var(--bad); }
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
 <div class="app">
-  <header>
-    <div class="logo">A</div>
-    <div>
+  <!-- Login view -->
+  <div class="login-wrap" id="loginWrap">
+    <div class="login">
       <h1>AgentCore Chat</h1>
-      <p class="sub">Secured with Cognito</p>
+      <p class="lead">Sign in with your Cognito account.</p>
+      <label for="user">Username</label>
+      <input id="user" autocomplete="username" />
+      <label for="pass">Password</label>
+      <input id="pass" type="password" autocomplete="current-password" />
+      <button class="primary" id="loginBtn">Sign in</button>
+      <div class="note" id="loginNote"></div>
     </div>
-    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Signed out</span></div>
-  </header>
-
-  <div class="login" id="login">
-    <p class="lead">Sign in to start a conversation with the agent.</p>
-    <label for="user">Username</label>
-    <input id="user" autocomplete="username" placeholder="your username" />
-    <label for="pass">Password</label>
-    <input id="pass" type="password" autocomplete="current-password" />
-    <button class="primary" id="loginBtn">Sign in</button>
-    <div class="note" id="loginNote"></div>
   </div>
 
-  <div class="chat" id="chat">
-    <div class="log" id="logArea"></div>
-    <div class="note" id="chatNote"></div>
+  <!-- Chat view -->
+  <div class="sidebar hidden" id="sidebar">
+    <div class="top"><button class="newchat" id="newChat">+ New conversation</button></div>
+    <div class="convs" id="convs"></div>
+    <div class="user-bar">
+      <div class="avatar" id="avatar">?</div>
+      <div class="uname" id="uname">...</div>
+      <button class="signout" id="signout">Sign out</button>
+    </div>
+  </div>
+  <div class="main hidden" id="main">
+    <div class="log" id="logArea"><div class="empty">Start a new conversation.</div></div>
+    <div class="cnote" id="chatNote"></div>
     <div class="composer">
       <textarea id="prompt" rows="1" placeholder="Type a message..."></textarea>
       <button id="sendBtn">Send</button>
@@ -141,43 +125,44 @@
 </div>
 
 <script>
-  // ==== Config: your live values ====
+  // ==== Config ====
   const REGION    = "us-east-1";
   const CLIENT_ID = "7dl51utivb5aikm9c41kd3gsi5";
-  const BACKEND   = "https://ag-75dc67a0e4e548c8906ffc071062c96d.ecs.us-east-1.on.aws/chat";
+  const BASE      = "https://ag-75dc67a0e4e548c8906ffc071062c96d.ecs.us-east-1.on.aws";
   const COGNITO   = `https://cognito-idp.${REGION}.amazonaws.com/`;
-  // ==================================
+  // ================
 
   let token = null;
-  // Session id must be >= 33 chars for AgentCore.
-  const sessionId = "web-" + Math.random().toString(36).slice(2) +
-                            Math.random().toString(36).slice(2) + Date.now().toString(36);
+  let userId = null;
+  let convs = {};          // { convId: { title, sessionId, messages: [{role,text}] } }
+  let activeConv = null;
 
   const $ = (id) => document.getElementById(id);
+  const newSessionId = () => "web-" + Math.random().toString(36).slice(2) +
+                             Math.random().toString(36).slice(2) + Date.now().toString(36);
 
+  // ---- Auth ----
   async function login(username, password) {
     const res = await fetch(COGNITO, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/x-amz-json-1.1",
-        "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
-      },
-      body: JSON.stringify({
-        AuthFlow: "USER_PASSWORD_AUTH",
-        ClientId: CLIENT_ID,
-        AuthParameters: { USERNAME: username, PASSWORD: password },
-      }),
+      headers: { "Content-Type": "application/x-amz-json-1.1",
+                 "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth" },
+      body: JSON.stringify({ AuthFlow: "USER_PASSWORD_AUTH", ClientId: CLIENT_ID,
+        AuthParameters: { USERNAME: username, PASSWORD: password } }),
     });
     const data = await res.json();
-    if (!res.ok || !data.AuthenticationResult) {
-      throw new Error(data.message || data.ChallengeName || "Sign-in failed");
-    }
-    // The harness authorizer checks the client_id claim, carried by the access token.
-    return data.AuthenticationResult.AccessToken;
+    if (!res.ok || !data.AuthenticationResult) throw new Error(data.message || data.ChallengeName || "Sign-in failed");
+    return data.AuthenticationResult.AccessToken;   // access token carries client_id claim
   }
 
-  async function callAgent(prompt) {
-    const res = await fetch(BACKEND, {
+  async function fetchMe() {
+    const res = await fetch(BASE + "/me", { headers: { "Authorization": "Bearer " + token } });
+    if (!res.ok) return {};
+    return await res.json();
+  }
+
+  async function callAgent(prompt, sessionId) {
+    const res = await fetch(BASE + "/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
       body: JSON.stringify({ prompt, sessionId }),
@@ -187,76 +172,104 @@
     return data.result;
   }
 
-  function addMsg(who, text, cls) {
-    const wrap = document.createElement("div");
-    wrap.className = "msg " + cls;
-    const label = document.createElement("div");
-    label.className = "who";
-    label.textContent = who;
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    if (cls === "agent") {
-      bubble.innerHTML = marked.parse(text || "");
-    } else {
-      bubble.textContent = text;
-    }
-    wrap.appendChild(label);
-    wrap.appendChild(bubble);
-    $("logArea").appendChild(wrap);
-    $("logArea").scrollTop = $("logArea").scrollHeight;
+  // ---- Conversation persistence (per user, survives refresh) ----
+  async function saveConvs() {
+    try { await window.storage.set("convs:" + userId, JSON.stringify(convs)); } catch (e) {}
+  }
+  async function loadConvs() {
+    try { const r = await window.storage.get("convs:" + userId); if (r) convs = JSON.parse(r.value); }
+    catch (e) { convs = {}; }
   }
 
-  $("loginBtn").onclick = async () => {
-    const u = $("user").value.trim(), p = $("pass").value;
-    if (!u || !p) return;
-    $("loginNote").textContent = "Signing in...";
-    $("loginNote").className = "note";
-    $("loginBtn").disabled = true;
-    try {
-      token = await login(u, p);
-      $("dot").classList.add("on");
-      $("statusText").textContent = "Signed in";
-      $("login").style.display = "none";
-      $("chat").style.display = "flex";
-      $("prompt").focus();
-    } catch (e) {
-      $("loginNote").textContent = e.message;
-      $("loginNote").className = "note bad";
-    } finally {
-      $("loginBtn").disabled = false;
-    }
-  };
+  // ---- UI ----
+  function renderConvList() {
+    const el = $("convs"); el.innerHTML = "";
+    const ids = Object.keys(convs).sort((a,b) => convs[b].created - convs[a].created);
+    ids.forEach(id => {
+      const d = document.createElement("div");
+      d.className = "conv" + (id === activeConv ? " active" : "");
+      d.textContent = convs[id].title || "New conversation";
+      d.onclick = () => { activeConv = id; renderConvList(); renderMessages(); };
+      el.appendChild(d);
+    });
+  }
+  function renderMessages() {
+    const log = $("logArea"); log.innerHTML = "";
+    const c = convs[activeConv];
+    if (!c || c.messages.length === 0) { log.innerHTML = '<div class="empty">Send a message to begin.</div>'; return; }
+    c.messages.forEach(m => addBubble(m.role === "user" ? "You" : "Agent", m.text, m.role));
+  }
+  function addBubble(who, text, role) {
+    const wrap = document.createElement("div"); wrap.className = "msg " + role;
+    const label = document.createElement("div"); label.className = "who"; label.textContent = who;
+    const bubble = document.createElement("div"); bubble.className = "bubble";
+    if (role === "agent") bubble.innerHTML = marked.parse(text || ""); else bubble.textContent = text;
+    wrap.appendChild(label); wrap.appendChild(bubble);
+    $("logArea").appendChild(wrap); $("logArea").scrollTop = $("logArea").scrollHeight;
+  }
+
+  function newConversation() {
+    const id = "c" + Date.now();
+    convs[id] = { title: "New conversation", sessionId: newSessionId(), created: Date.now(), messages: [] };
+    activeConv = id; renderConvList(); renderMessages(); saveConvs(); $("prompt").focus();
+  }
 
   async function send() {
     const prompt = $("prompt").value.trim();
     if (!prompt) return;
-    addMsg("You", prompt, "user");
-    $("prompt").value = "";
-    $("prompt").style.height = "auto";
-    $("chatNote").textContent = "Agent is thinking...";
-    $("chatNote").className = "note";
+    if (!activeConv) newConversation();
+    const c = convs[activeConv];
+    c.messages.push({ role: "user", text: prompt });
+    if (c.messages.length === 1) c.title = prompt.slice(0, 34);   // title from first message
+    renderConvList(); renderMessages(); saveConvs();
+    $("prompt").value = ""; $("prompt").style.height = "auto";
+    $("chatNote").textContent = "Agent is thinking..."; $("chatNote").className = "cnote";
     $("sendBtn").disabled = true;
     try {
-      const reply = await callAgent(prompt);
-      addMsg("Agent", reply, "agent");
-      $("chatNote").textContent = "";
+      const reply = await callAgent(prompt, c.sessionId);
+      c.messages.push({ role: "agent", text: reply });
+      renderMessages(); saveConvs(); $("chatNote").textContent = "";
     } catch (e) {
-      $("chatNote").textContent = e.message;
-      $("chatNote").className = "note bad";
-    } finally {
-      $("sendBtn").disabled = false;
-      $("prompt").focus();
-    }
+      $("chatNote").textContent = e.message; $("chatNote").className = "cnote bad";
+    } finally { $("sendBtn").disabled = false; $("prompt").focus(); }
   }
 
+  // ---- Wire up ----
+  $("loginBtn").onclick = async () => {
+    const u = $("user").value.trim(), p = $("pass").value;
+    if (!u || !p) return;
+    $("loginNote").textContent = "Signing in..."; $("loginNote").className = "note";
+    $("loginBtn").disabled = true;
+    try {
+      token = await login(u, p);
+      const me = await fetchMe();
+      userId = me.userId || u;
+      const display = me.username || u;
+      $("avatar").textContent = display.slice(0,1).toUpperCase();
+      $("uname").textContent = display;
+      $("loginWrap").classList.add("hidden");
+      $("sidebar").classList.remove("hidden");
+      $("main").classList.remove("hidden");
+      await loadConvs();
+      const ids = Object.keys(convs);
+      if (ids.length) { activeConv = ids.sort((a,b)=>convs[b].created-convs[a].created)[0]; }
+      renderConvList(); renderMessages();
+    } catch (e) {
+      $("loginNote").textContent = e.message; $("loginNote").className = "note bad";
+    } finally { $("loginBtn").disabled = false; }
+  };
+
+  $("signout").onclick = () => {
+    token = null; userId = null; convs = {}; activeConv = null;
+    $("sidebar").classList.add("hidden"); $("main").classList.add("hidden");
+    $("loginWrap").classList.remove("hidden");
+    $("user").value = ""; $("pass").value = ""; $("loginNote").textContent = "";
+  };
+
+  $("newChat").onclick = newConversation;
   $("sendBtn").onclick = send;
-  $("prompt").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-  });
-  $("prompt").addEventListener("input", function () {
-    this.style.height = "auto";
-    this.style.height = Math.min(this.scrollHeight, 120) + "px";
-  });
+  $("prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+  $("prompt").addEventListener("input", function () { this.style.height = "auto"; this.style.height = Math.min(this.scrollHeight,120)+"px"; });
 </script>
 </body>
 </html>
