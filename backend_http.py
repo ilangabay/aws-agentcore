@@ -41,8 +41,17 @@ HOST = f"https://bedrock-agentcore.{REGION}.amazonaws.com"
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"],
-                allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://main.d9gpnd3ah72nf.amplifyapp.com",
+        "http://localhost:8080",
+        "http://localhost:3000",
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class ChatRequest(BaseModel):
