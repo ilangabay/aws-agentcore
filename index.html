@@ -3,135 +3,158 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AgentCore Demonstrator</title>
+<title>AgentCore Chat</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
-  /* ── Design tokens ──────────────────────────────────────────
-     Subject: an internal "clearance terminal" for a secret-agent-themed
-     AgentCore demo (agent007). Direction: instrument-panel, not chatbot —
-     monospaced data face, a single amber signal accent on near-black,
-     login framed as "clearance" and the JWT as a visible credential strip.
-     Spends its one risk on the credential strip that reveals the live token. */
   :root {
-    --bg:        #0d0f12;
-    --panel:     #15181d;
-    --line:      #262b33;
-    --ink:       #e7e9ec;
-    --ink-dim:   #8b929c;
-    --signal:    #f5a623;   /* amber clearance light */
-    --signal-dim:#5a4a26;
-    --ok:        #4caf7e;
-    --bad:       #e5564b;
-    --mono: "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    --bg: #f7f6f3;
+    --surface: #ffffff;
+    --border: #e6e3dc;
+    --border-strong: #d3d1c7;
+    --ink: #2c2c2a;
+    --ink-soft: #6b6a64;
+    --ink-faint: #9a988f;
+    --accent: #4a6fa5;
+    --accent-soft: #eef3f9;
+    --agent-bg: #f1efe8;
+    --user-bg: #eef3f9;
+    --ok: #3b6d3b;
+    --bad: #a32d2d;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font-family: var(--mono); font-size: 14px; line-height: 1.5;
+    font-family: var(--sans); font-size: 15px; line-height: 1.6;
     min-height: 100vh; display: flex; align-items: center; justify-content: center;
     padding: 24px;
   }
-  .terminal {
-    width: 100%; max-width: 560px; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
+  .app {
+    width: 100%; max-width: 620px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
+    display: flex; flex-direction: column; max-height: 90vh;
   }
-  .bar {
+  header {
+    padding: 18px 22px; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 10px;
-    padding: 12px 16px; border-bottom: 1px solid var(--line);
-    font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--ink-dim);
   }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--signal-dim); }
-  .dot.live { background: var(--signal); box-shadow: 0 0 8px var(--signal); }
-  .body { padding: 20px 16px; }
-  label { display: block; font-size: 11px; letter-spacing: 0.1em;
-          text-transform: uppercase; color: var(--ink-dim); margin: 0 0 6px; }
-  input, textarea {
-    width: 100%; background: var(--bg); border: 1px solid var(--line);
-    color: var(--ink); font-family: var(--mono); font-size: 14px;
-    padding: 10px 12px; border-radius: 3px; margin-bottom: 14px;
+  header .logo {
+    width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 500; font-size: 15px;
   }
-  input:focus, textarea:focus { outline: none; border-color: var(--signal); }
-  button {
-    background: var(--signal); color: #1a1305; border: none; cursor: pointer;
-    font-family: var(--mono); font-weight: 600; font-size: 13px;
-    letter-spacing: 0.06em; padding: 10px 16px; border-radius: 3px;
+  header h1 { font-size: 16px; font-weight: 500; margin: 0; }
+  header .sub { font-size: 12px; color: var(--ink-faint); margin: 0; }
+  header .status {
+    margin-left: auto; font-size: 12px; color: var(--ink-faint);
+    display: flex; align-items: center; gap: 6px;
   }
-  button:disabled { opacity: 0.4; cursor: not-allowed; }
-  button.ghost { background: transparent; color: var(--ink-dim);
-                 border: 1px solid var(--line); }
-  .hidden { display: none; }
-  .cred {
-    margin-top: 14px; padding: 10px 12px; background: var(--bg);
-    border: 1px dashed var(--signal-dim); border-radius: 3px;
-    font-size: 11px; color: var(--ink-dim); word-break: break-all; max-height: 90px;
-    overflow: auto;
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); }
+  header .dot.on { background: var(--ok); }
+
+  /* Login */
+  .login { padding: 28px 22px; }
+  .login p.lead { color: var(--ink-soft); font-size: 14px; margin: 0 0 20px; }
+  label { display: block; font-size: 13px; color: var(--ink-soft); margin: 0 0 6px; }
+  input {
+    width: 100%; padding: 10px 12px; font-size: 15px; font-family: var(--sans);
+    border: 1px solid var(--border-strong); border-radius: 8px; background: #fff;
+    color: var(--ink); margin-bottom: 16px;
   }
-  .cred b { color: var(--signal); }
-  .log { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
-  .msg { margin-bottom: 12px; }
-  .msg .who { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-              color: var(--ink-dim); margin-bottom: 3px; }
-  .msg.agent .who { color: var(--signal); }
-  .status { font-size: 12px; margin-top: 10px; min-height: 16px; }
-  .status.ok { color: var(--ok); }
-  .status.bad { color: var(--bad); }
+  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  button.primary {
+    width: 100%; padding: 11px; font-size: 14px; font-weight: 500; font-family: var(--sans);
+    background: var(--accent); color: #fff; border: none; border-radius: 8px; cursor: pointer;
+  }
+  button.primary:hover { background: #3d5d8a; }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Chat */
+  .chat { display: none; flex-direction: column; flex: 1; min-height: 0; }
+  .log { flex: 1; overflow-y: auto; padding: 20px 22px; display: flex; flex-direction: column; gap: 16px; }
+  .msg { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
+  .msg .who { font-size: 11px; color: var(--ink-faint); letter-spacing: 0.02em; }
+  .msg .bubble { padding: 10px 14px; border-radius: 12px; font-size: 14px; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.user .bubble { background: var(--user-bg); border-bottom-right-radius: 4px; }
+  .msg.agent { align-self: flex-start; }
+  .msg.agent .bubble { background: var(--agent-bg); border-bottom-left-radius: 4px; }
+  /* markdown inside agent bubbles */
+  .bubble h1, .bubble h2, .bubble h3 { font-size: 15px; font-weight: 500; margin: 10px 0 4px; color: var(--ink); }
+  .bubble p { margin: 6px 0; }
+  .bubble ul, .bubble ol { margin: 6px 0; padding-left: 20px; }
+  .bubble li { margin: 2px 0; }
+  .bubble code { background: rgba(0,0,0,0.05); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  .bubble pre { background: rgba(0,0,0,0.05); padding: 10px; border-radius: 8px; overflow-x: auto; }
+  .bubble strong { font-weight: 500; }
+  .bubble a { color: var(--accent); }
+
+  .composer {
+    border-top: 1px solid var(--border); padding: 14px 18px;
+    display: flex; gap: 10px; align-items: flex-end;
+  }
+  .composer textarea {
+    flex: 1; resize: none; padding: 10px 12px; font-size: 14px; font-family: var(--sans);
+    border: 1px solid var(--border-strong); border-radius: 10px; background: #fff;
+    color: var(--ink); max-height: 120px; line-height: 1.5;
+  }
+  .composer textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .composer button {
+    padding: 10px 16px; font-size: 14px; font-weight: 500; font-family: var(--sans);
+    background: var(--accent); color: #fff; border: none; border-radius: 10px; cursor: pointer;
+  }
+  .composer button:hover { background: #3d5d8a; }
+  .composer button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .note { font-size: 12px; padding: 0 22px 12px; min-height: 14px; }
+  .note.bad { color: var(--bad); }
 </style>
 </head>
 <body>
-<div class="terminal">
-  <div class="bar">
-    <span class="dot" id="signal"></span>
-    <span id="barlabel">Clearance required</span>
+<div class="app">
+  <header>
+    <div class="logo">A</div>
+    <div>
+      <h1>AgentCore Chat</h1>
+      <p class="sub">Secured with Cognito</p>
+    </div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Signed out</span></div>
+  </header>
+
+  <div class="login" id="login">
+    <p class="lead">Sign in to start a conversation with the agent.</p>
+    <label for="user">Username</label>
+    <input id="user" autocomplete="username" placeholder="your username" />
+    <label for="pass">Password</label>
+    <input id="pass" type="password" autocomplete="current-password" />
+    <button class="primary" id="loginBtn">Sign in</button>
+    <div class="note" id="loginNote"></div>
   </div>
-  <div class="body">
 
-    <!-- Login -->
-    <div id="login">
-      <label for="user">Operative ID</label>
-      <input id="user" autocomplete="username" placeholder="ilangabay" />
-      <label for="pass">Passphrase</label>
-      <input id="pass" type="password" autocomplete="current-password" />
-      <button id="loginBtn">Request clearance</button>
-      <div class="status" id="loginStatus"></div>
+  <div class="chat" id="chat">
+    <div class="log" id="logArea"></div>
+    <div class="note" id="chatNote"></div>
+    <div class="composer">
+      <textarea id="prompt" rows="1" placeholder="Type a message..."></textarea>
+      <button id="sendBtn">Send</button>
     </div>
-
-    <!-- Authenticated -->
-    <div id="console" class="hidden">
-      <div class="cred">
-        <b>JWT acquired.</b> This token is sent as a Bearer credential on every
-        agent call. <span id="tokenPreview"></span>
-      </div>
-      <div class="log" id="log"></div>
-      <label for="prompt" style="margin-top:14px">Message</label>
-      <textarea id="prompt" rows="2" placeholder="Ask the agent…"></textarea>
-      <div style="display:flex; gap:8px;">
-        <button id="sendBtn">Transmit</button>
-        <button id="logoutBtn" class="ghost">Revoke</button>
-      </div>
-      <div class="status" id="chatStatus"></div>
-    </div>
-
   </div>
 </div>
 
 <script>
-  // ── Config: fill in YOUR values ─────────────────────────────
+  // ==== Config: your live values ====
   const REGION    = "us-east-1";
-  const CLIENT_ID = "7dl51utivb5aikm9c41kd3gsi5";          // your app client
-  const BACKEND   = "http://localhost:8000/chat";          // the FastAPI backend
+  const CLIENT_ID = "7dl51utivb5aikm9c41kd3gsi5";
+  const BACKEND   = "https://ag-75dc67a0e4e548c8906ffc071062c96d.ecs.us-east-1.on.aws/chat";
   const COGNITO   = `https://cognito-idp.${REGION}.amazonaws.com/`;
-  // ────────────────────────────────────────────────────────────
+  // ==================================
 
-  let idToken = null;
-  // AgentCore requires runtimeSessionId length >= 33.
-  let sessionId = "demo-" + Math.random().toString(36).slice(2) +
-                            Math.random().toString(36).slice(2) +
-                            Date.now().toString(36);
+  let token = null;
+  // Session id must be >= 33 chars for AgentCore.
+  const sessionId = "web-" + Math.random().toString(36).slice(2) +
+                            Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   const $ = (id) => document.getElementById(id);
 
-  // Cognito USER_PASSWORD_AUTH directly from the browser.
-  // This is the InitiateAuth API call — no SDK needed, just a POST.
   async function login(username, password) {
     const res = await fetch(COGNITO, {
       method: "POST",
@@ -146,85 +169,94 @@
       }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.message || data.__type || "auth failed");
-    // The Harness authorizer checks the 'client_id' claim, which lives on the
-    // ACCESS token (the ID token carries the client under 'aud' instead).
+    if (!res.ok || !data.AuthenticationResult) {
+      throw new Error(data.message || data.ChallengeName || "Sign-in failed");
+    }
+    // The harness authorizer checks the client_id claim, carried by the access token.
     return data.AuthenticationResult.AccessToken;
   }
 
   async function callAgent(prompt) {
     const res = await fetch(BACKEND, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + idToken,   // the credential under test
-      },
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
       body: JSON.stringify({ prompt, sessionId }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "agent call failed");
+    if (!res.ok) throw new Error(data.detail || "Request failed");
     return data.result;
   }
 
   function addMsg(who, text, cls) {
-    const d = document.createElement("div");
-    d.className = "msg " + (cls || "");
-    d.innerHTML = `<div class="who">${who}</div><div>${escapeHtml(text)}</div>`;
-    $("log").appendChild(d);
-    $("log").scrollTop = $("log").scrollHeight;
+    const wrap = document.createElement("div");
+    wrap.className = "msg " + cls;
+    const label = document.createElement("div");
+    label.className = "who";
+    label.textContent = who;
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    if (cls === "agent") {
+      bubble.innerHTML = marked.parse(text || "");
+    } else {
+      bubble.textContent = text;
+    }
+    wrap.appendChild(label);
+    wrap.appendChild(bubble);
+    $("logArea").appendChild(wrap);
+    $("logArea").scrollTop = $("logArea").scrollHeight;
   }
-  function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
 
   $("loginBtn").onclick = async () => {
     const u = $("user").value.trim(), p = $("pass").value;
     if (!u || !p) return;
-    $("loginStatus").textContent = "Authenticating…";
-    $("loginStatus").className = "status";
+    $("loginNote").textContent = "Signing in...";
+    $("loginNote").className = "note";
     $("loginBtn").disabled = true;
     try {
-      idToken = await login(u, p);
-      $("signal").classList.add("live");
-      $("barlabel").textContent = "Cleared · " + u;
-      $("login").classList.add("hidden");
-      $("console").classList.remove("hidden");
-      $("tokenPreview").textContent = idToken.slice(0, 24) + "…";
+      token = await login(u, p);
+      $("dot").classList.add("on");
+      $("statusText").textContent = "Signed in";
+      $("login").style.display = "none";
+      $("chat").style.display = "flex";
+      $("prompt").focus();
     } catch (e) {
-      $("loginStatus").textContent = "Denied: " + e.message;
-      $("loginStatus").className = "status bad";
+      $("loginNote").textContent = e.message;
+      $("loginNote").className = "note bad";
     } finally {
       $("loginBtn").disabled = false;
     }
   };
 
-  $("sendBtn").onclick = async () => {
+  async function send() {
     const prompt = $("prompt").value.trim();
     if (!prompt) return;
-    addMsg("Operative", prompt, "user");
+    addMsg("You", prompt, "user");
     $("prompt").value = "";
-    $("chatStatus").textContent = "Transmitting…";
-    $("chatStatus").className = "status";
+    $("prompt").style.height = "auto";
+    $("chatNote").textContent = "Agent is thinking...";
+    $("chatNote").className = "note";
     $("sendBtn").disabled = true;
     try {
       const reply = await callAgent(prompt);
       addMsg("Agent", reply, "agent");
-      $("chatStatus").textContent = "";
+      $("chatNote").textContent = "";
     } catch (e) {
-      $("chatStatus").textContent = "Error: " + e.message;
-      $("chatStatus").className = "status bad";
+      $("chatNote").textContent = e.message;
+      $("chatNote").className = "note bad";
     } finally {
       $("sendBtn").disabled = false;
+      $("prompt").focus();
     }
-  };
+  }
 
-  $("logoutBtn").onclick = () => {
-    idToken = null;
-    $("signal").classList.remove("live");
-    $("barlabel").textContent = "Clearance required";
-    $("console").classList.add("hidden");
-    $("login").classList.remove("hidden");
-    $("log").innerHTML = "";
-    $("loginStatus").textContent = "";
-  };
+  $("sendBtn").onclick = send;
+  $("prompt").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  $("prompt").addEventListener("input", function () {
+    this.style.height = "auto";
+    this.style.height = Math.min(this.scrollHeight, 120) + "px";
+  });
 </script>
 </body>
 </html>
