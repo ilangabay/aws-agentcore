@@ -1,27 +1,15 @@
 """
 Demonstrator backend — Harness (JWT-only), with CLIENT-SIDE TOOL USE.
 
-DECISIVE TEST BUILD
--------------------
-Prior finding: with a valid tool schema, round0 is now a clean toolUse-ONLY
-assistant turn (no interleaved text), yet round1 still fails with:
-    ValidationException: The number of toolResult blocks at messages.1.content
-    exceeds the number of toolUse blocks of previous turn.
-This means the harness's OWN session-history assembly is not persisting the
-assistant toolUse turn between our two POSTs — Bedrock sees "previous turn had
-0 toolUse blocks" and rejects our (correct) toolResult.
+Inline-function tool-use loop that WORKS by reconstructing the toolUse/toolResult
+pairing on the continuation POST (the harness's stored session history does not
+reliably persist the assistant toolUse turn in this preview build, so we hand
+Bedrock the full pairing ourselves).
 
-This build tests the hypothesis by NOT trusting the harness's stored history:
-on the continuation POST we RECONSTRUCT the full pairing ourselves —
-    [ user(prompt), assistant(toolUse), user(toolResult) ]
-in a single messages array.
-
-  - If this SUCCEEDS where the toolResult-only body failed  -> confirmed: the
-    harness lost the toolUse turn; the workaround is to send the pair ourselves.
-  - If this STILL fails                                     -> genuine harness /
-    Strands preview bug; the reliable path is owning the loop against Runtime.
-
-Toggle RECONSTRUCT_HISTORY to compare both behaviours in one build.
+Tools (client-side inline functions):
+  - add_numbers : deterministic, proves the loop
+  - get_time    : no-parameter tool
+  - get_hn_top  : live network call — fetches top Hacker News stories
 
 Run:
   uv pip install fastapi uvicorn requests botocore
@@ -59,11 +47,14 @@ ALLOWED_ORIGINS = [
 MAX_TOOL_ROUNDS = 5
 DEBUG_STREAM = True
 
-# THE decisive switch.
-#   True  -> continuation POST carries [user, assistant(toolUse), user(toolResult)]
-#            (do NOT rely on harness-stored history)
-#   False -> continuation POST carries only the toolResult (original behaviour)
+# Continuation strategy:
+#   True  -> POST [user(prompt), assistant(toolUse), user(toolResult)] ourselves
+#            (required: the harness does not reliably persist the toolUse turn)
+#   False -> POST only the toolResult (original behaviour; fails with a
+#            ValidationException in this preview build)
 RECONSTRUCT_HISTORY = True
+
+HN_BASE = "https://hacker-news.firebaseio.com/v0"
 # ------------------
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
@@ -83,13 +74,42 @@ def tool_add_numbers(args: dict):
     b = float(args.get("b", 0))
     return {"result": a + b}
 
+
 def tool_get_time(args: dict):
     import datetime
     return {"utc": datetime.datetime.now(datetime.timezone.utc).isoformat()}
 
+
+def tool_get_hn_top(args: dict):
+    """Fetch the current top N Hacker News stories (title, score, url, author)."""
+    n = int(args.get("count", 5))
+    n = max(1, min(n, 10))  # clamp to keep the demo fast
+    try:
+        ids_r = requests.get(f"{HN_BASE}/topstories.json", timeout=10)
+        ids_r.raise_for_status()
+        top_ids = ids_r.json()[:n]
+
+        stories = []
+        for sid in top_ids:
+            item_r = requests.get(f"{HN_BASE}/item/{sid}.json", timeout=10)
+            item_r.raise_for_status()
+            item = item_r.json() or {}
+            stories.append({
+                "title": item.get("title"),
+                "score": item.get("score"),
+                "url": item.get("url"),
+                "by": item.get("by"),
+                "comments": item.get("descendants"),
+            })
+        return {"stories": stories}
+    except requests.RequestException as e:
+        return {"error": f"HN fetch failed: {e}"}
+
+
 TOOLS = {
     "add_numbers": tool_add_numbers,
     "get_time": tool_get_time,
+    "get_hn_top": tool_get_hn_top,
 }
 
 
@@ -189,8 +209,6 @@ def parse_stream(raw: bytes, tag: str = "") -> dict:
             log.info("EVT %s", json.dumps(e, ensure_ascii=False)[:400])
 
     for evt in events:
-        # a stream-embedded error event (this is how the harness reports the
-        # Bedrock ValidationException — as a normal event, not an HTTP error)
         if "message" in evt and "ValidationException" in str(evt.get("message", "")):
             server_error = evt["message"]
 
@@ -277,7 +295,7 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
         tools_used.append(tu["name"])
         result, status = handle_tool_call(tu["name"], tu.get("input", {}))
         log.info("TOOL CALL #%d name=%s input=%s -> %s (%s)",
-                 rounds, tu["name"], tu.get("input"), result, status)
+                 rounds, tu["name"], tu.get("input"), str(result)[:300], status)
 
         tool_result_block = {
             "toolResult": {
@@ -288,8 +306,6 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
         }
 
         if RECONSTRUCT_HISTORY:
-            # Do NOT trust the harness-stored history. Hand Bedrock the full
-            # pairing ourselves: user(prompt) -> assistant(toolUse) -> user(result).
             assistant_tooluse_msg = {
                 "role": "assistant",
                 "content": [{
@@ -306,7 +322,6 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
                 {"role": "user", "content": [tool_result_block]},
             ]
         else:
-            # Original behaviour: rely on the session to carry the toolUse turn.
             messages = [{"role": "user", "content": [tool_result_block]}]
 
         body = {"actorId": actor_id, "messages": messages}
@@ -319,8 +334,6 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
 
     final_text = parsed["text"].strip() or "\n".join(t for t in all_text if t.strip())
 
-    # Clean degradation: if the loop died on a server-side validation error,
-    # say so instead of returning an empty bubble.
     if not final_text and server_error:
         final_text = ("[harness error] la continuation d'outil a échoué côté "
                       "Bedrock (voir logs). ValidationException reçue.")
@@ -337,5 +350,5 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
         "stopReason": parsed.get("stopReason"),
         "toolRounds": rounds,
         "reconstructHistory": RECONSTRUCT_HISTORY,
-        "serverError": server_error,   # None if clean; the ValidationException text if not
+        "serverError": server_error,
     }
