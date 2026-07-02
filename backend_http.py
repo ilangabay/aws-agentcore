@@ -1,20 +1,20 @@
 """
 Demonstrator backend — Harness (JWT-only), with CLIENT-SIDE TOOL USE.
 
-INSTRUMENTED build: logs the raw decoded events and the parsed result at every
-round, so you can see exactly what the harness streams back and whether the
-tool actually fires / the final number ever arrives.
+IMPORTANT — stream shape:
+This preview harness emits FLAT events, e.g.
+    {"role": "assistant"}
+    {"contentBlockIndex": 0, "delta": {"text": "Carr"}}
+    {"contentBlockIndex": 1, "start": {"toolUse": {"name": ..., "toolUseId": ...}}}
+    {"contentBlockIndex": 1, "delta": {"toolUse": {"input": "{\"a\":"}}}
+    {"stopReason": "tool_use"}
+i.e. the union members (delta / start / stopReason) sit at the TOP LEVEL, NOT
+wrapped in contentBlockDelta / contentBlockStart / messageStop as the API
+reference shows. parse_stream() reads the flat shape first and falls back to the
+wrapped shape, so it works either way.
 
-The inline_function tools are registered ON THE HARNESS RESOURCE (via the
-console), so they are NOT declared on each invoke.
-
-Flow per user turn:
-  1. POST the user message to /harnesses/invoke (bearer auth).
-  2. Parse the streamed events. If a toolUse block appears -> run the local
-     function, POST a toolResult content block (inside a user message) back on
-     the SAME session, and continue.
-  3. Loop until the stream stops with a reason other than tool_use.
-     Text from EVERY round is accumulated, so a final-round number is never lost.
+Inline_function tools are registered ON THE HARNESS RESOURCE (console), so they
+are NOT declared on each invoke.
 
 Run:
   uv pip install fastapi uvicorn requests botocore
@@ -24,6 +24,7 @@ Run:
 import os
 import re
 import json
+import time
 import base64
 import logging
 import urllib.parse
@@ -49,7 +50,7 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
 ]
 MAX_TOOL_ROUNDS = 5      # safety cap on tool-use loop iterations
-DEBUG_STREAM = True      # set False to silence raw-event logging
+DEBUG_STREAM = True      # set False to silence diagnostic logging
 # ------------------
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
@@ -83,6 +84,8 @@ TOOLS = {
 def handle_tool_call(name: str, tool_input: dict):
     fn = TOOLS.get(name)
     if fn is None:
+        log.warning("DISPATCH MISS: harness asked for '%s'; known tools: %s",
+                    name, list(TOOLS))
         return {"error": f"Unknown tool '{name}'"}, "error"
     try:
         return fn(tool_input or {}), "success"
@@ -124,14 +127,22 @@ def me(authorization: str = Header(None)):
 # ============================================================
 # Core invoke + tool-use loop
 # ============================================================
-def post_to_harness(authorization: str, session_id: str, body: dict) -> bytes:
+def post_to_harness(authorization: str, session_id: str, body: dict, tag: str = "") -> bytes:
     url = f"{HOST}/harnesses/invoke?harnessArn={urllib.parse.quote(HARNESS_ARN, safe='')}"
     headers = {
         "Authorization": authorization,
         "Content-Type": "application/json",
         SESSION_HEADER: session_id,
     }
+    if DEBUG_STREAM:
+        log.info(">>> POST %s session=%s body=%s",
+                 tag, session_id, json.dumps(body, ensure_ascii=False)[:600])
+    t0 = time.time()
     r = requests.post(url, headers=headers, data=json.dumps(body), timeout=120)
+    dt = (time.time() - t0) * 1000
+    if DEBUG_STREAM:
+        log.info("<<< POST %s status=%s latency=%.0fms bytes=%d",
+                 tag, r.status_code, dt, len(r.content))
     if r.status_code in (401, 403):
         raise HTTPException(r.status_code, f"authorizer rejected: {r.text}")
     if not r.ok:
@@ -140,7 +151,6 @@ def post_to_harness(authorization: str, session_id: str, body: dict) -> bytes:
 
 
 def iter_events(raw: bytes):
-    """Yield decoded JSON events from an event-stream byte blob."""
     buf = EventStreamBuffer()
     buf.add_data(raw)
     for event in buf:
@@ -154,11 +164,9 @@ def iter_events(raw: bytes):
 
 def parse_stream(raw: bytes, tag: str = "") -> dict:
     """
-    Decode the event-stream and extract:
-      - accumulated text for THIS invoke,
-      - a toolUse request (name, input, toolUseId),
-      - the stopReason.
-    Returns { text, toolUse, stopReason }.
+    Extract accumulated text, a toolUse request, and the stopReason from the
+    stream. Handles BOTH the flat event shape this harness emits and the wrapped
+    shape from the API reference.
     """
     text_parts = []
     tool_use = None
@@ -166,40 +174,51 @@ def parse_stream(raw: bytes, tag: str = "") -> dict:
     tool_input_json = ""
 
     events = list(iter_events(raw))
+
     if DEBUG_STREAM:
-        log.info("---- RAW STREAM %s (%d events) ----", tag, len(events))
+        log.info("---- STREAM %s: %d events ----", tag, len(events))
         for e in events:
             log.info("EVT %s", json.dumps(e, ensure_ascii=False)[:400])
 
     for evt in events:
-        # content block start: toolUse header (name + id)
-        start = evt.get("contentBlockStart", {}).get("start", {})
-        if "toolUse" in start:
+        # Normalize: unwrap the wrapped shape if present, else use the event
+        # itself (flat shape).
+        start = evt.get("contentBlockStart", {}).get("start") \
+            if "contentBlockStart" in evt else evt.get("start")
+        delta = evt.get("contentBlockDelta", {}).get("delta") \
+            if "contentBlockDelta" in evt else evt.get("delta")
+        stop = evt.get("messageStop", {}).get("stopReason") \
+            if "messageStop" in evt else evt.get("stopReason")
+
+        # --- content block start: toolUse header (name + id) ---
+        if isinstance(start, dict) and "toolUse" in start:
             tu = start["toolUse"]
             tool_use = {"name": tu.get("name"),
                         "toolUseId": tu.get("toolUseId"),
                         "input": {}}
 
-        # content block delta: text or partial-json tool input
-        delta = evt.get("contentBlockDelta", {}).get("delta", {})
+        # --- content block delta: text or partial-json tool input ---
         if isinstance(delta, dict):
             if "text" in delta:
                 text_parts.append(delta["text"])
             if "toolUse" in delta:
                 tool_input_json += delta["toolUse"].get("input", "") or ""
 
-        # message stop
-        if "messageStop" in evt:
-            stop_reason = evt["messageStop"].get("stopReason")
+        # --- stop reason ---
+        if stop is not None:
+            stop_reason = stop
 
     if tool_use is not None and tool_input_json:
         try:
             tool_use["input"] = json.loads(tool_input_json)
         except Exception:
-            pass
+            log.warning("STREAM %s: tool input JSON failed to parse. buffer=%r",
+                        tag, tool_input_json[:300])
 
-    # fallback text recovery
+    # fallback text recovery — if this fires, structured parsing missed something
     if not text_parts:
+        if DEBUG_STREAM:
+            log.warning("STREAM %s: no text from structured deltas; regex fallback.", tag)
         txt = raw.decode("utf-8", errors="replace")
         for m in re.finditer(r'"delta":\{"text":"((?:[^"\\]|\\.)*)"\}', txt):
             try:
@@ -209,9 +228,10 @@ def parse_stream(raw: bytes, tag: str = "") -> dict:
 
     parsed = {"text": "".join(text_parts), "toolUse": tool_use, "stopReason": stop_reason}
     if DEBUG_STREAM:
-        log.info("PARSED %s -> stopReason=%s toolUse=%s text=%r",
+        log.info("PARSED %s -> stopReason=%s toolUse=%s input=%s text=%r",
                  tag, parsed["stopReason"],
                  parsed["toolUse"]["name"] if parsed["toolUse"] else None,
+                 parsed["toolUse"]["input"] if parsed["toolUse"] else None,
                  parsed["text"][:200])
     return parsed
 
@@ -225,15 +245,17 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
     if not actor_id:
         raise HTTPException(401, "Token has no 'sub' claim")
 
-    # Accumulate text across ALL rounds so a final-round number is never lost.
+    if DEBUG_STREAM:
+        log.info("========== /chat prompt=%r session=%s ==========",
+                 req.prompt, req.sessionId)
+
     all_text = []
 
-    # First round: user message. Tools live on the harness resource.
     body = {
         "actorId": actor_id,
         "messages": [{"role": "user", "content": [{"text": req.prompt}]}],
     }
-    raw = post_to_harness(authorization, req.sessionId, body)
+    raw = post_to_harness(authorization, req.sessionId, body, tag="round0")
     parsed = parse_stream(raw, tag="round0")
     if parsed["text"]:
         all_text.append(parsed["text"])
@@ -262,18 +284,23 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
                 }],
             }],
         }
-        raw = post_to_harness(authorization, req.sessionId, body)
+        raw = post_to_harness(authorization, req.sessionId, body, tag=f"round{rounds}")
         parsed = parse_stream(raw, tag=f"round{rounds}")
         if parsed["text"]:
             all_text.append(parsed["text"])
 
-    # Prefer the LAST non-empty round's text (usually the final answer),
-    # but fall back to the full accumulation if the last round was empty.
+    if rounds >= MAX_TOOL_ROUNDS and parsed.get("stopReason") == "tool_use":
+        log.warning("Hit MAX_TOOL_ROUNDS (%d) still asking for tools.", MAX_TOOL_ROUNDS)
+
     final_text = parsed["text"].strip() or "\n".join(t for t in all_text if t.strip())
+
+    if DEBUG_STREAM:
+        log.info("========== /chat done rounds=%d toolsUsed=%s stop=%s result=%r ==========",
+                 rounds, tools_used, parsed.get("stopReason"), final_text[:200])
 
     return {
         "result": final_text or "(no text in response)",
-        "allText": all_text,                 # every round's text, for debugging
+        "allText": all_text,
         "toolsUsed": tools_used,
         "stopReason": parsed.get("stopReason"),
         "toolRounds": rounds,
