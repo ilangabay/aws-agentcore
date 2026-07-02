@@ -138,8 +138,13 @@
   let activeConv = null;
 
   const $ = (id) => document.getElementById(id);
-  const newSessionId = () => "web-" + Math.random().toString(36).slice(2) +
-                             Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const newSessionId = () => {
+    // AgentCore requires runtimeSessionId length >= 33. Build one and pad to be safe.
+    let id = "web-" + Math.random().toString(36).slice(2) +
+                      Math.random().toString(36).slice(2) + Date.now().toString(36);
+    while (id.length < 40) id += Math.random().toString(36).slice(2);
+    return id.slice(0, 48);
+  };
 
   // ---- Auth ----
   async function login(username, password) {
@@ -219,6 +224,8 @@
     if (!prompt) return;
     if (!activeConv) newConversation();
     const c = convs[activeConv];
+    // Heal legacy/short session ids (AgentCore requires >= 33 chars).
+    if (!c.sessionId || c.sessionId.length < 33) c.sessionId = newSessionId();
     c.messages.push({ role: "user", text: prompt });
     if (c.messages.length === 1) c.title = prompt.slice(0, 34);   // title from first message
     renderConvList(); renderMessages(); saveConvs();
