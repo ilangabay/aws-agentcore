@@ -1,15 +1,21 @@
 """
 Demonstrator backend — Harness (JWT-only), with CLIENT-SIDE TOOL USE.
 
-Adds the tool-use loop: when the harness asks to call a client-side "Fonction
-personnalisée", THIS backend executes it and returns the result, looping until
-the harness produces a final answer.
+Tool-use loop: when the harness asks to call a client-side "Fonction
+personnalisee" (inline_function), THIS backend executes it and returns the
+result, looping until the harness produces a final answer.
+
+The inline_function tools are registered ON THE HARNESS RESOURCE (via the
+console), so they are NOT declared on each invoke — the harness already knows
+them. This backend only needs to (a) run the local function when asked and
+(b) send the result back.
 
 Flow per user turn:
   1. POST the user message to /harnesses/invoke (bearer auth).
-  2. Parse the streamed events. If a toolUse event appears -> run the local
-     function, POST a toolResult back in the SAME session, and continue.
-  3. Loop until the stream ends with a final assistant message.
+  2. Parse the streamed events. If a toolUse block appears -> run the local
+     function, POST a toolResult *content block inside a user message* back in
+     the SAME session, and continue.
+  3. Loop until the stream stops with a reason other than tool_use.
 
 Auth + per-user memory unchanged: bearer token forwarded, actorId = token 'sub'.
 
@@ -55,8 +61,9 @@ app.add_middleware(
 # ============================================================
 # CLIENT-SIDE TOOLS
 # Each tool is a Python function. The dispatcher maps the tool
-# name (as configured in the Harness "Fonction personnalisée")
-# to the function. Register the SAME name/schema in the Harness UI.
+# name to the function. The name/schema is declared ON THE HARNESS
+# (console -> Fonctions personnalisees), NOT here — so the keys
+# below MUST match the "Nom" of each Fonction personnalisee exactly.
 # ============================================================
 
 def tool_add_numbers(args: dict):
@@ -67,22 +74,24 @@ def tool_add_numbers(args: dict):
 
 def tool_get_time(args: dict):
     import datetime
-    return {"utc": datetime.datetime.utcnow().isoformat() + "Z"}
+    return {"utc": datetime.datetime.now(datetime.timezone.utc).isoformat()}
 
 # Map Harness tool names -> Python callables.
+# NOTE: these keys must exactly match the "Nom" fields configured on the harness.
 TOOLS = {
     "add_numbers": tool_add_numbers,
     "get_time": tool_get_time,
 }
 
+
 def handle_tool_call(name: str, tool_input: dict):
     fn = TOOLS.get(name)
     if fn is None:
-        return {"error": f"Unknown tool '{name}'"}
+        return {"error": f"Unknown tool '{name}'"}, "error"
     try:
-        return fn(tool_input or {})
+        return fn(tool_input or {}), "success"
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e)}, "error"
 
 
 # ============================================================
@@ -137,45 +146,45 @@ def post_to_harness(authorization: str, session_id: str, body: dict) -> bytes:
 
 def parse_stream(raw: bytes) -> dict:
     """
-    Decode the event-stream and extract either:
-      - accumulated final text, and/or
-      - a toolUse request (name, input, toolUseId), and
+    Decode the event-stream and extract:
+      - accumulated final text,
+      - a toolUse request (name, input, toolUseId), reconstructed from the
+        contentBlockStart header + partial-json input deltas,
       - the stopReason.
     Returns { text, toolUse, stopReason }.
+
+    Note: toolUse only ever appears nested under contentBlockStart.start or
+    contentBlockDelta.delta — never as a top-level event key.
     """
     text_parts = []
     tool_use = None
     stop_reason = None
-    tool_input_json = ""   # toolUse input may stream as partial json deltas
+    tool_input_json = ""   # toolUse input streams as partial-json string deltas
 
     def scan_event(evt):
         nonlocal tool_use, stop_reason, tool_input_json
-        # final text deltas
-        delta = evt.get("delta") or evt.get("contentBlockDelta", {}).get("delta", {})
-        if isinstance(delta, dict) and "text" in delta:
-            text_parts.append(delta["text"])
-        # tool use — the model requests a client-side function
-        if "toolUse" in evt:
-            tu = evt["toolUse"]
-            tool_use = {
-                "name": tu.get("name"),
-                "toolUseId": tu.get("toolUseId"),
-                "input": tu.get("input", {}),
-            }
-        # contentBlockStart can carry a toolUse header
+
+        # --- content block start: may carry the toolUse header (name + id) ---
         start = evt.get("contentBlockStart", {}).get("start", {})
         if "toolUse" in start:
             tu = start["toolUse"]
-            tool_use = tool_use or {"name": tu.get("name"),
-                                    "toolUseId": tu.get("toolUseId"), "input": {}}
-        # toolUse input can arrive as partial-json deltas
-        if isinstance(delta, dict) and "toolUse" in delta:
-            tool_input_json += delta["toolUse"].get("input", "")
-        # stop reason
+            # start a fresh tool_use; input arrives via deltas below
+            tool_use = {"name": tu.get("name"),
+                        "toolUseId": tu.get("toolUseId"),
+                        "input": {}}
+
+        # --- content block delta: text or partial-json tool input ---
+        delta = evt.get("contentBlockDelta", {}).get("delta", {})
+        if isinstance(delta, dict):
+            if "text" in delta:
+                text_parts.append(delta["text"])
+            if "toolUse" in delta:
+                # delta.toolUse.input is a STRING fragment of JSON
+                tool_input_json += delta["toolUse"].get("input", "") or ""
+
+        # --- message stop: the reason we halted (tool_use / end_turn / ...) ---
         if "messageStop" in evt:
             stop_reason = evt["messageStop"].get("stopReason")
-        if "stopReason" in evt:
-            stop_reason = evt["stopReason"]
 
     try:
         buf = EventStreamBuffer()
@@ -190,14 +199,15 @@ def parse_stream(raw: bytes) -> dict:
     except Exception:
         pass
 
-    # if input streamed as partial json, prefer that
+    # Reconstruct tool input from accumulated partial-json deltas.
     if tool_use is not None and tool_input_json:
         try:
             tool_use["input"] = json.loads(tool_input_json)
         except Exception:
+            # leave input as {} rather than passing a raw string downstream
             pass
 
-    # fallback text recovery
+    # Fallback text recovery if the structured decode found nothing.
     if not text_parts:
         txt = raw.decode("utf-8", errors="replace")
         for m in re.finditer(r'"delta":\{"text":"((?:[^"\\]|\\.)*)"\}', txt):
@@ -218,7 +228,7 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
     if not actor_id:
         raise HTTPException(401, "Token has no 'sub' claim")
 
-    # First round: send the user message.
+    # First round: just the user message. Tools live on the harness resource.
     body = {
         "actorId": actor_id,
         "messages": [{"role": "user", "content": [{"text": req.prompt}]}],
@@ -229,18 +239,27 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
     # Tool-use loop: while the harness asks for a client-side tool, run it and reply.
     rounds = 0
     tools_used = []
-    while parsed.get("toolUse") and rounds < MAX_TOOL_ROUNDS:
+    while parsed.get("toolUse") and parsed.get("stopReason") == "tool_use" \
+            and rounds < MAX_TOOL_ROUNDS:
         rounds += 1
         tu = parsed["toolUse"]
         tools_used.append(tu["name"])
-        result = handle_tool_call(tu["name"], tu.get("input", {}))
-        # Send the tool result back in the same session so the harness continues.
+        result, status = handle_tool_call(tu["name"], tu.get("input", {}))
+
+        # Return the result as a toolResult CONTENT BLOCK inside a user message,
+        # on the same session, so the harness continues its reasoning.
         body = {
             "actorId": actor_id,
-            "toolResult": {
-                "toolUseId": tu["toolUseId"],
-                "content": [{"text": json.dumps(result)}],
-            },
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "toolResult": {
+                        "toolUseId": tu["toolUseId"],
+                        "content": [{"text": json.dumps(result)}],
+                        "status": status,
+                    }
+                }],
+            }],
         }
         raw = post_to_harness(authorization, req.sessionId, body)
         parsed = parse_stream(raw)
@@ -248,4 +267,6 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
     return {
         "result": parsed.get("text") or "(no text in response)",
         "toolsUsed": tools_used,   # so the frontend can show what fired
+        "stopReason": parsed.get("stopReason"),
+        "toolRounds": rounds,
     }
