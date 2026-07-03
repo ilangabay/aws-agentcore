@@ -46,7 +46,6 @@ ALLOWED_ORIGINS = [
 ]
 MAX_TOOL_ROUNDS = 5
 DEBUG_STREAM = True
-
 # Continuation strategy:
 #   True  -> POST [user(prompt), assistant(toolUse), user(toolResult)] ourselves
 #            (required: the harness does not reliably persist the toolUse turn)
@@ -55,6 +54,10 @@ DEBUG_STREAM = True
 RECONSTRUCT_HISTORY = True
 
 HN_BASE = "https://hacker-news.firebaseio.com/v0"
+
+# Reported back to the client so the UI can show which model answered.
+# Set this to whatever the harness is actually configured with.
+MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 # ------------------
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
@@ -194,13 +197,16 @@ def iter_events(raw: bytes):
 
 
 def parse_stream(raw: bytes, tag: str = "") -> dict:
-    """Extract text, toolUse, stopReason. Handles flat AND wrapped event shapes.
-    Also surfaces a server-side ValidationException carried inside the stream."""
+    """Extract text, toolUse, stopReason, model, usage. Handles flat AND wrapped
+    event shapes. Also surfaces a server-side ValidationException carried inside
+    the stream."""
     text_parts = []
     tool_use = None
     stop_reason = None
     tool_input_json = ""
     server_error = None
+    model_id = None
+    usage = None
 
     events = list(iter_events(raw))
     if DEBUG_STREAM:
@@ -211,6 +217,16 @@ def parse_stream(raw: bytes, tag: str = "") -> dict:
     for evt in events:
         if "message" in evt and "ValidationException" in str(evt.get("message", "")):
             server_error = evt["message"]
+
+        # Model id can appear on the messageStart event (Bedrock converse-stream).
+        ms = evt.get("messageStart", {}) if "messageStart" in evt else evt
+        if isinstance(ms, dict):
+            model_id = model_id or ms.get("model") or ms.get("modelId")
+
+        # Usage/token counts on metadata event, if the harness forwards it.
+        meta = evt.get("metadata", {}) if "metadata" in evt else {}
+        if isinstance(meta, dict) and meta.get("usage"):
+            usage = meta["usage"]
 
         start = evt.get("contentBlockStart", {}).get("start") \
             if "contentBlockStart" in evt else evt.get("start")
@@ -252,13 +268,14 @@ def parse_stream(raw: bytes, tag: str = "") -> dict:
                 text_parts.append(m.group(1))
 
     parsed = {"text": "".join(text_parts), "toolUse": tool_use,
-              "stopReason": stop_reason, "serverError": server_error}
+              "stopReason": stop_reason, "serverError": server_error,
+              "modelId": model_id, "usage": usage}
     if DEBUG_STREAM:
-        log.info("PARSED %s -> stop=%s toolUse=%s input=%s err=%s text=%r",
+        log.info("PARSED %s -> stop=%s toolUse=%s input=%s err=%s model=%s text=%r",
                  tag, parsed["stopReason"],
                  parsed["toolUse"]["name"] if parsed["toolUse"] else None,
                  parsed["toolUse"]["input"] if parsed["toolUse"] else None,
-                 bool(server_error), parsed["text"][:160])
+                 bool(server_error), model_id, parsed["text"][:160])
     return parsed
 
 
@@ -276,6 +293,8 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
                  req.prompt, req.sessionId, RECONSTRUCT_HISTORY)
 
     all_text = []
+    trace = []            # ordered, step-by-step record of what the agent did
+    t_start = time.time()
     original_user_msg = {"role": "user", "content": [{"text": req.prompt}]}
 
     body = {"actorId": actor_id, "messages": [original_user_msg]}
@@ -283,6 +302,16 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
     parsed = parse_stream(raw, tag="round0")
     if parsed["text"]:
         all_text.append(parsed["text"])
+
+    model_id = parsed.get("modelId") or MODEL_ID
+    usage = parsed.get("usage")
+    trace.append({
+        "step": "model",
+        "round": 0,
+        "stopReason": parsed.get("stopReason"),
+        "hasText": bool(parsed["text"]),
+        "requestedTool": parsed["toolUse"]["name"] if parsed.get("toolUse") else None,
+    })
 
     rounds = 0
     tools_used = []
@@ -296,6 +325,15 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
         result, status = handle_tool_call(tu["name"], tu.get("input", {}))
         log.info("TOOL CALL #%d name=%s input=%s -> %s (%s)",
                  rounds, tu["name"], tu.get("input"), str(result)[:300], status)
+
+        trace.append({
+            "step": "tool",
+            "round": rounds,
+            "name": tu["name"],
+            "input": tu.get("input", {}),
+            "status": status,
+            "resultPreview": str(result)[:400],
+        })
 
         tool_result_block = {
             "toolResult": {
@@ -327,16 +365,30 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
         body = {"actorId": actor_id, "messages": messages}
         raw = post_to_harness(authorization, req.sessionId, body, tag=f"round{rounds}")
         parsed = parse_stream(raw, tag=f"round{rounds}")
+        if parsed.get("modelId"):
+            model_id = parsed["modelId"]
+        if parsed.get("usage"):
+            usage = parsed["usage"]
         if parsed.get("serverError"):
             server_error = parsed["serverError"]
         if parsed["text"]:
             all_text.append(parsed["text"])
+
+        trace.append({
+            "step": "model",
+            "round": rounds,
+            "stopReason": parsed.get("stopReason"),
+            "hasText": bool(parsed["text"]),
+            "requestedTool": parsed["toolUse"]["name"] if parsed.get("toolUse") else None,
+        })
 
     final_text = parsed["text"].strip() or "\n".join(t for t in all_text if t.strip())
 
     if not final_text and server_error:
         final_text = ("[harness error] la continuation d'outil a échoué côté "
                       "Bedrock (voir logs). ValidationException reçue.")
+
+    elapsed_ms = int((time.time() - t_start) * 1000)
 
     if DEBUG_STREAM:
         log.info("========== /chat done rounds=%d tools=%s stop=%s err=%s result=%r ==========",
@@ -351,4 +403,9 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
         "toolRounds": rounds,
         "reconstructHistory": RECONSTRUCT_HISTORY,
         "serverError": server_error,
+        # --- new: trace metadata for the UI ---
+        "model": model_id,
+        "usage": usage,
+        "elapsedMs": elapsed_ms,
+        "trace": trace,
     }
