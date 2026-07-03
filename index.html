@@ -81,6 +81,8 @@
   .bubble code { background: rgba(0,0,0,0.05); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
   .bubble pre { background: rgba(0,0,0,0.05); padding: 10px; border-radius: 8px; overflow-x: auto; }
   .bubble strong { font-weight: 600; }
+  .model-tag { font-size: 11px; color: var(--ink-faint); margin-top: 3px; padding-left: 2px;
+    font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
 
   .composer { border-top: 1px solid var(--border); padding: 14px 18px; display: flex; gap: 10px; align-items: flex-end; }
   .composer textarea { flex: 1; resize: none; padding: 10px 12px; font-size: 14px; font-family: var(--sans);
@@ -144,6 +146,12 @@
   let activeConv = null;
 
   const $ = (id) => document.getElementById(id);
+  const shortModel = (m) => {
+    if (!m) return "";
+    // "us.anthropic.claude-sonnet-4-5-20250929-v1:0" -> "claude-sonnet-4-5"
+    const mm = m.match(/claude[-\w]*?\d(?:-\d)?/i);
+    return mm ? mm[0].replace(/^anthropic\./, "") : m;
+  };
   const newSessionId = () => {
     // AgentCore requires runtimeSessionId length >= 33. Build one and pad to be safe.
     let id = "web-" + Math.random().toString(36).slice(2) +
@@ -180,7 +188,7 @@
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Request failed");
-    return data.result;
+    return { text: data.result, model: data.model };
   }
 
   // ---- Conversation persistence (per user, survives refresh) ----
@@ -220,15 +228,20 @@
     const log = $("logArea"); log.innerHTML = "";
     const c = convs[activeConv];
     if (!c || c.messages.length === 0) { log.innerHTML = '<div class="empty">Send a message to begin.</div>'; return; }
-    c.messages.forEach(m => addBubble(m.role === "user" ? "You" : "Agent", m.text, m.role));
+    c.messages.forEach(m => addBubble(m.role === "user" ? "You" : "Agent", m.text, m.role, m.model));
   }
 
-  function addBubble(who, text, role) {
+  function addBubble(who, text, role, model) {
     const wrap = document.createElement("div"); wrap.className = "msg " + role;
     const label = document.createElement("div"); label.className = "who"; label.textContent = who;
     const bubble = document.createElement("div"); bubble.className = "bubble";
     if (role === "agent") bubble.innerHTML = marked.parse(text || ""); else bubble.textContent = text;
     wrap.appendChild(label); wrap.appendChild(bubble);
+    if (role === "agent" && model) {
+      const m = document.createElement("div"); m.className = "model-tag";
+      m.textContent = shortModel(model);
+      wrap.appendChild(m);
+    }
     $("logArea").appendChild(wrap); $("logArea").scrollTop = $("logArea").scrollHeight;
   }
 
@@ -265,7 +278,7 @@
     $("sendBtn").disabled = true;
     try {
       const reply = await callAgent(prompt, c.sessionId);
-      c.messages.push({ role: "agent", text: reply });
+      c.messages.push({ role: "agent", text: reply.text, model: reply.model });
       renderMessages(); saveConvs(); $("chatNote").textContent = "";
     } catch (e) {
       $("chatNote").textContent = e.message; $("chatNote").className = "cnote bad";
