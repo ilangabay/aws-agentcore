@@ -53,11 +53,11 @@ DEBUG_STREAM = True
 #            ValidationException in this preview build)
 RECONSTRUCT_HISTORY = True
 
-HN_BASE = "https://hacker-news.firebaseio.com/v0"
+HN_BASE = "https://hacker-news.firebaseio.com/v0"  # (plus utilisé par un outil ; à retirer si inutile ailleurs)
 
 # Reported back to the client so the UI can show which model answered.
 # Set this to whatever the harness is actually configured with.
-MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 # ------------------
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
@@ -67,64 +67,6 @@ app.add_middleware(
     CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False, allow_methods=["*"], allow_headers=["*"],
 )
-
-# ============================================================
-# CLIENT-SIDE TOOLS  (keys MUST match the harness "Nom" fields)
-# ============================================================
-
-def tool_add_numbers(args: dict):
-    a = float(args.get("a", 0))
-    b = float(args.get("b", 0))
-    return {"result": a + b}
-
-
-def tool_get_time(args: dict):
-    import datetime
-    return {"utc": datetime.datetime.now(datetime.timezone.utc).isoformat()}
-
-
-def tool_get_hn_top(args: dict):
-    """Fetch the current top N Hacker News stories (title, score, url, author)."""
-    n = int(args.get("count", 5))
-    n = max(1, min(n, 10))  # clamp to keep the demo fast
-    try:
-        ids_r = requests.get(f"{HN_BASE}/topstories.json", timeout=10)
-        ids_r.raise_for_status()
-        top_ids = ids_r.json()[:n]
-
-        stories = []
-        for sid in top_ids:
-            item_r = requests.get(f"{HN_BASE}/item/{sid}.json", timeout=10)
-            item_r.raise_for_status()
-            item = item_r.json() or {}
-            stories.append({
-                "title": item.get("title"),
-                "score": item.get("score"),
-                "url": item.get("url"),
-                "by": item.get("by"),
-                "comments": item.get("descendants"),
-            })
-        return {"stories": stories}
-    except requests.RequestException as e:
-        return {"error": f"HN fetch failed: {e}"}
-
-
-TOOLS = {
-    "add_numbers": tool_add_numbers,
-    "get_time": tool_get_time,
-    "get_hn_top": tool_get_hn_top,
-}
-
-
-def handle_tool_call(name: str, tool_input: dict):
-    fn = TOOLS.get(name)
-    if fn is None:
-        log.warning("DISPATCH MISS: harness asked for '%s'; known: %s", name, list(TOOLS))
-        return {"error": f"Unknown tool '{name}'"}, "error"
-    try:
-        return fn(tool_input or {}), "success"
-    except Exception as e:
-        return {"error": str(e)}, "error"
 
 
 # ============================================================
@@ -159,7 +101,9 @@ def me(authorization: str = Header(None)):
 
 
 # ============================================================
-# Core invoke + tool-use loop
+# Core invoke  (le harness gère lui-même ses outils natifs :
+# navigation web / browser / web_search cote serveur AgentCore.
+# Le backend ne fait que relayer.)
 # ============================================================
 def post_to_harness(authorization: str, session_id: str, body: dict, tag: str = "") -> bytes:
     url = f"{HOST}/harnesses/invoke?harnessArn={urllib.parse.quote(HARNESS_ARN, safe='')}"
@@ -197,13 +141,11 @@ def iter_events(raw: bytes):
 
 
 def parse_stream(raw: bytes, tag: str = "") -> dict:
-    """Extract text, toolUse, stopReason, model, usage. Handles flat AND wrapped
-    event shapes. Also surfaces a server-side ValidationException carried inside
-    the stream."""
+    """Extract text, stopReason, model, usage. Handles flat AND wrapped event
+    shapes. Also surfaces a server-side ValidationException carried inside the
+    stream."""
     text_parts = []
-    tool_use = None
     stop_reason = None
-    tool_input_json = ""
     server_error = None
     model_id = None
     usage = None
@@ -228,34 +170,16 @@ def parse_stream(raw: bytes, tag: str = "") -> dict:
         if isinstance(meta, dict) and meta.get("usage"):
             usage = meta["usage"]
 
-        start = evt.get("contentBlockStart", {}).get("start") \
-            if "contentBlockStart" in evt else evt.get("start")
         delta = evt.get("contentBlockDelta", {}).get("delta") \
             if "contentBlockDelta" in evt else evt.get("delta")
         stop = evt.get("messageStop", {}).get("stopReason") \
             if "messageStop" in evt else evt.get("stopReason")
 
-        if isinstance(start, dict) and "toolUse" in start:
-            tu = start["toolUse"]
-            tool_use = {"name": tu.get("name"),
-                        "toolUseId": tu.get("toolUseId"),
-                        "input": {}}
-
-        if isinstance(delta, dict):
-            if "text" in delta:
-                text_parts.append(delta["text"])
-            if "toolUse" in delta:
-                tool_input_json += delta["toolUse"].get("input", "") or ""
+        if isinstance(delta, dict) and "text" in delta:
+            text_parts.append(delta["text"])
 
         if stop is not None:
             stop_reason = stop
-
-    if tool_use is not None and tool_input_json:
-        try:
-            tool_use["input"] = json.loads(tool_input_json)
-        except Exception:
-            log.warning("STREAM %s: tool input JSON failed to parse: %r",
-                        tag, tool_input_json[:300])
 
     if not text_parts and server_error is None:
         if DEBUG_STREAM:
@@ -267,15 +191,13 @@ def parse_stream(raw: bytes, tag: str = "") -> dict:
             except Exception:
                 text_parts.append(m.group(1))
 
-    parsed = {"text": "".join(text_parts), "toolUse": tool_use,
+    parsed = {"text": "".join(text_parts),
               "stopReason": stop_reason, "serverError": server_error,
               "modelId": model_id, "usage": usage}
     if DEBUG_STREAM:
-        log.info("PARSED %s -> stop=%s toolUse=%s input=%s err=%s model=%s text=%r",
-                 tag, parsed["stopReason"],
-                 parsed["toolUse"]["name"] if parsed["toolUse"] else None,
-                 parsed["toolUse"]["input"] if parsed["toolUse"] else None,
-                 bool(server_error), model_id, parsed["text"][:160])
+        log.info("PARSED %s -> stop=%s err=%s model=%s text=%r",
+                 tag, parsed["stopReason"], bool(server_error),
+                 model_id, parsed["text"][:160])
     return parsed
 
 
@@ -289,121 +211,43 @@ def chat(req: ChatRequest, authorization: str = Header(None)):
         raise HTTPException(401, "Token has no 'sub' claim")
 
     if DEBUG_STREAM:
-        log.info("========== /chat prompt=%r session=%s reconstruct=%s ==========",
-                 req.prompt, req.sessionId, RECONSTRUCT_HISTORY)
+        log.info("========== /chat prompt=%r session=%s ==========",
+                 req.prompt, req.sessionId)
 
-    all_text = []
-    trace = []            # ordered, step-by-step record of what the agent did
     t_start = time.time()
     original_user_msg = {"role": "user", "content": [{"text": req.prompt}]}
 
     body = {"actorId": actor_id, "messages": [original_user_msg]}
-    raw = post_to_harness(authorization, req.sessionId, body, tag="round0")
-    parsed = parse_stream(raw, tag="round0")
-    if parsed["text"]:
-        all_text.append(parsed["text"])
+    raw = post_to_harness(authorization, req.sessionId, body, tag="invoke")
+    parsed = parse_stream(raw, tag="invoke")
 
     model_id = parsed.get("modelId") or MODEL_ID
     usage = parsed.get("usage")
-    trace.append({
+    server_error = parsed.get("serverError")
+
+    final_text = parsed["text"].strip()
+
+    if not final_text and server_error:
+        final_text = ("[harness error] l'invocation a echoue cote Bedrock "
+                      "(voir logs). ValidationException recue.")
+
+    elapsed_ms = int((time.time() - t_start) * 1000)
+
+    trace = [{
         "step": "model",
         "round": 0,
         "stopReason": parsed.get("stopReason"),
         "hasText": bool(parsed["text"]),
-        "requestedTool": parsed["toolUse"]["name"] if parsed.get("toolUse") else None,
-    })
-
-    rounds = 0
-    tools_used = []
-    server_error = parsed.get("serverError")
-
-    while parsed.get("toolUse") and parsed.get("stopReason") == "tool_use" \
-            and rounds < MAX_TOOL_ROUNDS:
-        rounds += 1
-        tu = parsed["toolUse"]
-        tools_used.append(tu["name"])
-        result, status = handle_tool_call(tu["name"], tu.get("input", {}))
-        log.info("TOOL CALL #%d name=%s input=%s -> %s (%s)",
-                 rounds, tu["name"], tu.get("input"), str(result)[:300], status)
-
-        trace.append({
-            "step": "tool",
-            "round": rounds,
-            "name": tu["name"],
-            "input": tu.get("input", {}),
-            "status": status,
-            "resultPreview": str(result)[:400],
-        })
-
-        tool_result_block = {
-            "toolResult": {
-                "toolUseId": tu["toolUseId"],
-                "content": [{"text": json.dumps(result)}],
-                "status": status,
-            }
-        }
-
-        if RECONSTRUCT_HISTORY:
-            assistant_tooluse_msg = {
-                "role": "assistant",
-                "content": [{
-                    "toolUse": {
-                        "toolUseId": tu["toolUseId"],
-                        "name": tu["name"],
-                        "input": tu.get("input", {}),
-                    }
-                }],
-            }
-            messages = [
-                original_user_msg,
-                assistant_tooluse_msg,
-                {"role": "user", "content": [tool_result_block]},
-            ]
-        else:
-            messages = [{"role": "user", "content": [tool_result_block]}]
-
-        body = {"actorId": actor_id, "messages": messages}
-        raw = post_to_harness(authorization, req.sessionId, body, tag=f"round{rounds}")
-        parsed = parse_stream(raw, tag=f"round{rounds}")
-        if parsed.get("modelId"):
-            model_id = parsed["modelId"]
-        if parsed.get("usage"):
-            usage = parsed["usage"]
-        if parsed.get("serverError"):
-            server_error = parsed["serverError"]
-        if parsed["text"]:
-            all_text.append(parsed["text"])
-
-        trace.append({
-            "step": "model",
-            "round": rounds,
-            "stopReason": parsed.get("stopReason"),
-            "hasText": bool(parsed["text"]),
-            "requestedTool": parsed["toolUse"]["name"] if parsed.get("toolUse") else None,
-        })
-
-    final_text = parsed["text"].strip() or "\n".join(t for t in all_text if t.strip())
-
-    if not final_text and server_error:
-        final_text = ("[harness error] la continuation d'outil a échoué côté "
-                      "Bedrock (voir logs). ValidationException reçue.")
-
-    elapsed_ms = int((time.time() - t_start) * 1000)
+    }]
 
     if DEBUG_STREAM:
-        log.info("========== /chat done rounds=%d tools=%s stop=%s err=%s result=%r ==========",
-                 rounds, tools_used, parsed.get("stopReason"), bool(server_error),
-                 final_text[:160])
+        log.info("========== /chat done stop=%s err=%s result=%r ==========",
+                 parsed.get("stopReason"), bool(server_error), final_text[:160])
 
     return {
         "result": final_text or "(no text in response)",
-        "allText": all_text,
-        "toolsUsed": tools_used,
         "stopReason": parsed.get("stopReason"),
-        "toolRounds": rounds,
-        "reconstructHistory": RECONSTRUCT_HISTORY,
         "serverError": server_error,
-        # --- new: trace metadata for the UI ---
         "model": model_id,
         "usage": usage,
         "elapsedMs": elapsed_ms,
